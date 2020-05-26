@@ -5,6 +5,7 @@ import torch.nn as nn
 
 Tensor = torch.Tensor
 BoolTensor = torch.BoolTensor
+ByteTensor = torch.ByteTensor
 
 
 class PositionalEncoder(nn.Module):
@@ -51,7 +52,13 @@ class TransformerEncoder(nn.Module):
                                            dropout=self.dropout)
         self.t_encoder = nn.TransformerEncoder(encoder_layer=layer, num_layers=self.n_layers)
 
-    def forward(self, src: Tensor, src_mask: Tensor, src_key_padding_mask: BoolTensor):
+        self._init_weights()
+
+    def _init_weights(self):
+        initrange = 0.1
+        self.embedding.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, src: Tensor, src_mask: ByteTensor, src_key_padding_mask: BoolTensor):
         """Forward pass on the Transformer Encoder.
 
         :param src: Inputs to be encoded.
@@ -76,7 +83,7 @@ class TransformerEncoder(nn.Module):
             >>> encoder = Encoder(VOCAB_SIZE, d_model=512, n_layers=6, n_heads=4)
             >>> encoder(src, pad_mask)
         """
-        embeds = self.embedding(src)
+        embeds = self.embedding(src) * math.sqrt(self.d_model)
         positions = self.pe(embeds)
         encoded = self.t_encoder(positions, mask=src_mask,
                                  src_key_padding_mask=src_key_padding_mask)
@@ -103,11 +110,17 @@ class TransformerDecoder(nn.Module):
                                            dropout=self.dropout)
         self.t_decoder = nn.TransformerDecoder(decoder_layer=layer, num_layers=self.n_layers)
 
+        self._init_weights()
+
+    def _init_weights(self):
+        initrange = 0.1
+        self.embedding.weight.data.uniform_(-initrange, initrange)
+
     def forward(
         self,
         tgt: Tensor,
         memory: Tensor,
-        tgt_mask: Tensor,
+        tgt_mask: ByteTensor,
         tgt_key_padding_mask: BoolTensor,
         memory_key_padding_mask: BoolTensor
     ):
@@ -135,7 +148,7 @@ class TransformerDecoder(nn.Module):
         Example:
             >>>
         """
-        embeds = self.embedding(tgt)
+        embeds = self.embedding(tgt) * math.sqrt(self.d_model)
         positions = self.pe(embeds)
         decoded = self.t_decoder(tgt=positions, memory=memory, tgt_mask=tgt_mask,
                                  tgt_key_padding_mask=tgt_key_padding_mask,
@@ -169,12 +182,19 @@ class Transformer(nn.Module):
                                           self.n_heads, dropout=self.dropout)
         self.linear = nn.Linear(self.d_model, self.label_v_size)
 
+        self._init_weights()
+
+    def _init_weights(self):
+        initrange = 0.1
+        self.linear.bias.data.zero_()
+        self.linear.weight.data.uniform_(-initrange, initrange)
+
     def forward(
         self,
         src: Tensor,
         tgt: Tensor,
-        src_mask: Tensor,
-        tgt_mask: Tensor,
+        src_mask: ByteTensor,
+        tgt_mask: ByteTensor,
         src_key_padding_mask: BoolTensor,
         tgt_key_padding_mask: BoolTensor,
         memory_key_padding_mask: BoolTensor
