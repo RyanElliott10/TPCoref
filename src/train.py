@@ -11,17 +11,17 @@ from dataset import get_dataiter
 from model import Transformer
 
 torch.manual_seed(42)
-# torch.set_printoptions(threshold=50000)
+torch.set_printoptions(threshold=50000)
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-# nlp = spacy.load('en')
+nlp = spacy.load('en')
 
 D_MODEL = 512
 N_LAYERS = 4
 N_HEADS = 8
-DROPOUT = 0.5
-LR = 1e-3
-N_EPOCHS = 5
+DROPOUT = 0.2
+LR = 1e-4
+N_EPOCHS = 10
 B_SIZE = 4
 
 
@@ -47,7 +47,7 @@ def train(train_iter, val_iter, TEXT, LABEL):
           f'\nLearning Rate: {LR}\nNum Epochs: {N_EPOCHS}\nBatch Size: {B_SIZE}'
           f'\nSource Vocab Size: {SRC_V_SIZE}\nTarget Vocab Size: {TGT_V_SIZE}\n')
 
-    loss_interval = 32
+    loss_interval = 128
     loss_values_sum = 0.
     loss_values = []
     validation_values = []
@@ -55,6 +55,8 @@ def train(train_iter, val_iter, TEXT, LABEL):
     model.train()
     for epoch in range(N_EPOCHS):
         running_loss = 0.
+        print(f'Epoch {epoch+1}/{N_EPOCHS}')
+
         for b_num, batch in enumerate(train_iter):
             torch.cuda.empty_cache()
             start_time = time.time()
@@ -77,7 +79,7 @@ def train(train_iter, val_iter, TEXT, LABEL):
             SRC_SEQ_LEN = src.size(-1)
             TGT_SEQ_LEN = tgt.size(-1)
 
-            src_mask = Transformer.generate_square_subsequent_mask(SRC_SEQ_LEN).to(device)
+            src_mask = None
             tgt_mask = Transformer.generate_square_subsequent_mask(TGT_SEQ_LEN).to(device)
             src_key_padding_mask = (src == TEXT.vocab.stoi['<pad>']).to(device)
             tgt_key_padding_mask = (tgt == LABEL.vocab.stoi['<pad>']).to(device)
@@ -85,7 +87,7 @@ def train(train_iter, val_iter, TEXT, LABEL):
 
             if epoch == b_num == 0:
                 if args.verbose:
-                    print(f'src_mask:\n{src_mask}')
+                    print(f'src_mask:\t{src_mask.shape if src_mask is not None else src_mask}')
                     print(f'tgt_mask:\t{tgt_mask.shape}\n{tgt_mask}')
                     print(f'src_key_padding_mask:\t{src_key_padding_mask.shape}'
                           f'\n{src_key_padding_mask}')
@@ -132,9 +134,7 @@ def train(train_iter, val_iter, TEXT, LABEL):
                 loss_values.append((true_batch_num, loss_values_sum / loss_interval))
                 loss_values_sum = 0.
 
-            if b_num == 0:
-                print(f'Epoch {epoch+1}/{N_EPOCHS}')
-            if b_num % 10 == 0:
+            if b_num % 128 == 0:
                 print(f'\tBatch {b_num}/{len(train_iter)} | secs/batch: '
                       f'{round(el_time, 4)} | loss: {loss} | '
                       f'lr: {scheduler.get_last_lr()}')
@@ -152,20 +152,20 @@ def train(train_iter, val_iter, TEXT, LABEL):
                 plt.show()
 
         scheduler.step()
-        print(f'Epoch {epoch}/{N_EPOCHS} | loss: {running_loss}')
-        save_path = f'models/train/train{epoch}.pth'
-        torch.save(model.state_dict(), save_path)
+        print(f'Epoch {epoch+1}/{N_EPOCHS} | loss: {running_loss}')
+        if epoch != N_EPOCHS-1:
+            save_path = f'../models/train/train{epoch}.pth'
+            torch.save(model.state_dict(), save_path)
 
+    print(f'Expected output shape {tgt_input.shape}\nTargets:{tgt_input}')
     print(f'output raw shape: {output.shape}\nargmax:\n{format_preds(output, TGT_SEQ_LEN)}')
 
-    save_path = 'models/train/goldtrain.pth'
+    save_path = '../models/train/goldtrain.pth'
     torch.save(model.state_dict(), save_path)
-    # src = "This is a random sentence lol I wonder how this works."
-    # predict(model, src, TEXT, LABEL, custom_sent=True)
 
 
 def format_preds(output, TGT_SEQ_LEN):
-    """Return a tensor of shape (TGT_SEQ_LEN, BATCH_SIZE). So to iterate over a single example, you go
+    """Returns a tensor of shape (TGT_SEQ_LEN, BATCH_SIZE). So to iterate over a single example, you go
     over the tensor row by row.
     """
     log_softmax = nn.LogSoftmax(dim=-1)
@@ -193,7 +193,7 @@ def evaluate(model, val_iter, TEXT, LABEL):
             SRC_SEQ_LEN = src.size(-1)
             TGT_SEQ_LEN = tgt.size(-1)
 
-            src_mask = Transformer.generate_square_subsequent_mask(SRC_SEQ_LEN).to(device)
+            src_mask = None
             tgt_mask = Transformer.generate_square_subsequent_mask(TGT_SEQ_LEN).to(device)
             src_key_padding_mask = (src == TEXT.vocab.stoi['<pad>']).to(device)
             tgt_key_padding_mask = (tgt == LABEL.vocab.stoi['<pad>']).to(device)

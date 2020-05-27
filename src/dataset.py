@@ -139,7 +139,7 @@ def get_ref_token(
     idx: int,
     proposed_ent_idxs: List[int],
     ents: List[Entity],
-    no_ref: int
+    no_ref: str
 ) -> Tuple[int, int]:
     """Gets the reference token for a given entity.
 
@@ -172,7 +172,8 @@ def parse_referents(
     """
     references = list()
     for i in range(len(sents)):
-        ref_idx = get_ref_token(i, tok_map[i], ents, len(sents))
+        # ref_idx = get_ref_token(i, tok_map[i], ents, len(sents))
+        ref_idx = get_ref_token(i, tok_map[i], ents, NO_REF_TOK)
         references.append(ref_idx)
     return references
 
