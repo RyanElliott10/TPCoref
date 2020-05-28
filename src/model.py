@@ -8,6 +8,117 @@ BoolTensor = torch.BoolTensor
 ByteTensor = torch.ByteTensor
 
 
+class ELTransformer(nn.Module):
+    """A transformer that doesn't use a decoder. Simply a TransformerEncoder and Linear projection
+    layer.
+    """
+
+    def __init__(
+        self,
+        src_v_size: int,
+        label_v_size: int,
+        d_model: int,
+        n_layers: int,
+        n_heads: int,
+        dropout: float = 0.
+    ):
+        super(ELTransformer, self).__init__()
+
+        self.src_v_size = src_v_size
+        self.label_v_size = label_v_size
+        self.d_model = d_model
+        self.n_layers = n_layers
+        self.n_heads = n_heads
+        self.dropout = dropout
+
+        self.encoder = TransformerEncoder(self.src_v_size, self.d_model, self.n_layers,
+                                          self.n_heads, dropout=self.dropout)
+        self.linear = nn.Linear(self.d_model, self.label_v_size)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        initrange = 0.1
+        self.linear.bias.data.zero_()
+        self.linear.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, src: Tensor, src_mask: ByteTensor, src_key_padding_mask: BoolTensor):
+        encoded = self.encoder(src=src, src_mask=src_mask,
+                               src_key_padding_mask=src_key_padding_mask)
+        proj = self.linear(encoded)
+        return proj
+
+    @staticmethod
+    def generate_square_subsequent_mask(seq_size: int):
+        """Generate a square mask for the sequence. Returns a byte tensor (rather than a float
+        tensor) to mask the indexes (per the PyTorch source code, this is allowed) to avoid the
+        issue with softmax and float('-inf').
+        """
+        mask = torch.triu(torch.ones(seq_size, seq_size), diagonal=1).byte()
+        return mask
+
+
+class Transformer(nn.Module):
+
+    def __init__(
+        self,
+        src_v_size: int,
+        label_v_size: int,
+        d_model: int,
+        n_layers: int,
+        n_heads: int,
+        dropout: float = 0.
+    ):
+        super(Transformer, self).__init__()
+
+        self.src_v_size = src_v_size
+        self.label_v_size = label_v_size
+        self.d_model = d_model
+        self.n_layers = n_layers
+        self.n_heads = n_heads
+        self.dropout = dropout
+
+        self.encoder = TransformerEncoder(self.src_v_size, self.d_model, self.n_layers,
+                                          self.n_heads, dropout=self.dropout)
+        self.decoder = TransformerDecoder(self.label_v_size, self.d_model, self.n_layers,
+                                          self.n_heads, dropout=self.dropout)
+        self.linear = nn.Linear(self.d_model, self.label_v_size)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        initrange = 0.1
+        self.linear.bias.data.zero_()
+        self.linear.weight.data.uniform_(-initrange, initrange)
+
+    def forward(
+        self,
+        src: Tensor,
+        tgt: Tensor,
+        src_mask: ByteTensor,
+        tgt_mask: ByteTensor,
+        src_key_padding_mask: BoolTensor,
+        tgt_key_padding_mask: BoolTensor,
+        memory_key_padding_mask: BoolTensor
+    ):
+        encoded = self.encoder(src=src, src_mask=src_mask,
+                               src_key_padding_mask=src_key_padding_mask)
+        decoded = self.decoder(tgt=tgt, memory=encoded, tgt_mask=tgt_mask,
+                               tgt_key_padding_mask=tgt_key_padding_mask,
+                               memory_key_padding_mask=memory_key_padding_mask)
+        proj = self.linear(decoded)
+        return proj
+
+    @staticmethod
+    def generate_square_subsequent_mask(seq_size: int):
+        """Generate a square mask for the sequence. Returns a byte tensor (rather than a float
+        tensor) to mask the indexes (per the PyTorch source code, this is allowed) to avoid the
+        issue with softmax and float('-inf').
+        """
+        mask = torch.triu(torch.ones(seq_size, seq_size), diagonal=1).byte()
+        return mask
+
+
 class PositionalEncoder(nn.Module):
     """Positional encoding class pulled from the PyTorch documentation tutorial
     on Transformers for seq2seq models:
@@ -156,80 +267,10 @@ class TransformerDecoder(nn.Module):
         return decoded
 
 
-class Transformer(nn.Module):
-
-    def __init__(
-        self,
-        src_v_size: int,
-        label_v_size: int,
-        d_model: int,
-        n_layers: int,
-        n_heads: int,
-        dropout: float = 0.
-    ):
-        super(Transformer, self).__init__()
-
-        self.src_v_size = src_v_size
-        self.label_v_size = label_v_size
-        self.d_model = d_model
-        self.n_layers = n_layers
-        self.n_heads = n_heads
-        self.dropout = dropout
-
-        self.encoder = TransformerEncoder(self.src_v_size, self.d_model, self.n_layers,
-                                          self.n_heads, dropout=self.dropout)
-        self.decoder = TransformerDecoder(self.label_v_size, self.d_model, self.n_layers,
-                                          self.n_heads, dropout=self.dropout)
-        self.linear = nn.Linear(self.d_model, self.label_v_size)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        initrange = 0.1
-        self.linear.bias.data.zero_()
-        self.linear.weight.data.uniform_(-initrange, initrange)
-
-    def forward(
-        self,
-        src: Tensor,
-        tgt: Tensor,
-        src_mask: ByteTensor,
-        tgt_mask: ByteTensor,
-        src_key_padding_mask: BoolTensor,
-        tgt_key_padding_mask: BoolTensor,
-        memory_key_padding_mask: BoolTensor
-    ):
-        encoded = self.encoder(src=src, src_mask=src_mask,
-                               src_key_padding_mask=src_key_padding_mask)
-        decoded = self.decoder(tgt=tgt, memory=encoded, tgt_mask=tgt_mask,
-                               tgt_key_padding_mask=tgt_key_padding_mask,
-                               memory_key_padding_mask=memory_key_padding_mask)
-        proj = self.linear(decoded)
-        return proj
-
-    @staticmethod
-    def generate_square_subsequent_mask(seq_size: int):
-        """Generate a square mask for the sequence. Returns a byte tensor (rather than a float
-        tensor) to mask the indexes (per the PyTorch source code, this is allowed) to avoid the
-        issue with softmax and float('-inf').
-        """
-        mask = torch.triu(torch.ones(seq_size, seq_size), diagonal=1).byte()
-        return mask
-
-
-class TPEncoder(nn.Module):
-    pass
-
-
-class TPDecoder(nn.Module):
-    pass
-
-
-class TransformerPointer(nn.Module):
-    pass
-
-
 class PyTransformer(nn.Module):
+    """Mostly a debug class. Makes use of the native PyTorch nn.Transformer class with two
+    embedding layers and a linear output layer.
+    """
 
     def __init__(
         self,
