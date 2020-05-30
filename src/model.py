@@ -59,6 +59,11 @@ class ELTransformer(nn.Module):
 
 
 class Transformer(nn.Module):
+    """Full custom Transformer model. Utlizes the following custom classes:
+        - PositionalEncoder
+        - TransformerEncoder
+        - TransformerDecoder
+    """
 
     def __init__(
         self,
@@ -147,7 +152,7 @@ class TransformerEncoder(nn.Module):
 
     def __init__(self, v_size: int, d_model: int, n_layers: int, n_heads: int, dropout: float = 0.):
         """
-
+        # TODO add args
         """
         super(TransformerEncoder, self).__init__()
 
@@ -205,7 +210,7 @@ class TransformerDecoder(nn.Module):
 
     def __init__(self, v_size: int, d_model: int, n_layers: int, n_heads: int, dropout: float = 0.):
         """
-
+        # TODO add args
         """
         super(TransformerDecoder, self).__init__()
 
@@ -285,12 +290,13 @@ class PyTransformer(nn.Module):
 
         self.embedding = nn.Embedding(src_v_size, d_model)
         self.transformer = nn.Transformer(d_model, n_heads, n_layers, n_layers)
-        self.linear = nn.Linear(512, label_v_size)
+        self.linear = nn.Linear(d_model, label_v_size)
 
     def forward(
         self,
         src: Tensor,
         tgt: Tensor,
+        src_mask: Tensor,
         tgt_mask: Tensor,
         src_key_padding_mask: BoolTensor,
         tgt_key_padding_mask: BoolTensor,
@@ -298,8 +304,8 @@ class PyTransformer(nn.Module):
     ):
         src_embeds = self.embedding(src)
         tgt_embeds = self.embedding(tgt)
-        output = self.transformer(src=src_embeds, tgt=tgt_embeds, tgt_mask=tgt_mask,
-                                  src_key_padding_mask=src_key_padding_mask,
+        output = self.transformer(src=src_embeds, tgt=tgt_embeds, src_mask=src_mask,
+                                  tgt_mask=tgt_mask, src_key_padding_mask=src_key_padding_mask,
                                   tgt_key_padding_mask=tgt_key_padding_mask,
                                   memory_key_padding_mask=memory_key_padding_mask)
         output = self.linear(output)
