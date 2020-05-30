@@ -1,4 +1,5 @@
 import argparse
+import sys
 import time
 from datetime import datetime
 from typing import List
@@ -12,11 +13,7 @@ import torch.nn.functional as F
 from dataset import get_dataiter
 from model import Transformer
 
-try:
-    import google.colab
-    IN_COLAB = True
-except:
-    IN_COLAB = False
+IN_COLAB = 'google.colab' in sys.modules
 
 torch.manual_seed(42)
 if torch.cuda.is_available():
