@@ -151,9 +151,6 @@ class PositionalEncoder(nn.Module):
 class TransformerEncoder(nn.Module):
 
     def __init__(self, v_size: int, d_model: int, n_layers: int, n_heads: int, dropout: float = 0.):
-        """
-        # TODO add args
-        """
         super(TransformerEncoder, self).__init__()
 
         self.v_size = v_size
@@ -209,9 +206,6 @@ class TransformerEncoder(nn.Module):
 class TransformerDecoder(nn.Module):
 
     def __init__(self, v_size: int, d_model: int, n_layers: int, n_heads: int, dropout: float = 0.):
-        """
-        # TODO add args
-        """
         super(TransformerDecoder, self).__init__()
 
         self.v_size = v_size

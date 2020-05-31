@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from dataset import get_dataiter
-from model import Transformer
+from data import get_dataiter
+from model import Transformer, PyTransformer
 
 IN_COLAB = 'google.colab' in sys.modules
 
@@ -32,8 +32,11 @@ N_EPOCHS = 0
 B_SIZE = 0
 
 
-def create_src_masks(src, SRC_SEQ_LEN, TEXT):
-    src_mask = None
+def create_src_masks(src, SRC_SEQ_LEN, TEXT, use_srcmask=False):
+    if use_srcmask:
+        src_mask = Transformer.generate_square_subsequent_mask(SRC_SEQ_LEN).to(device)
+    else:
+        src_mask = None
     src_key_padding_mask = (src == TEXT.vocab.stoi['<pad>']).bool().to(device)
     memory_key_padding_mask = (src == TEXT.vocab.stoi['<pad>']).bool().to(device)
     return src_mask, src_key_padding_mask, memory_key_padding_mask
@@ -46,11 +49,6 @@ def create_tgt_masks(tgt, TGT_SEQ_LEN, LABEL):
 
 
 def ed_train(train_iter, val_iter, TEXT, LABEL):
-    """After extensive testing, I've found a few errors in how we are evaluating the predictions.
-    Firstly, we should always use LogSoftmax(dim=-1) and argmax(dim=-1) when evaluating. But
-    Furthermore, CrossEntropyLoss needs to accept a tensor alternating examples. So, we should use
-    tgt.view(-1) where tgt.shape = (TGT_SEQ_LEN, BATCH_SIZE).
-    """
     global D_MODEL, N_LAYERS, N_HEADS, DROPOUT, N_EPOCHS, LR
     SRC_V_SIZE = len(TEXT.vocab)
     TGT_V_SIZE = len(LABEL.vocab)
@@ -58,7 +56,7 @@ def ed_train(train_iter, val_iter, TEXT, LABEL):
     model = Transformer(SRC_V_SIZE, TGT_V_SIZE, D_MODEL, N_LAYERS,
                         N_HEADS, dropout=DROPOUT).to(device)
     optim = torch.optim.SGD(model.parameters(), lr=LR)
-    scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=1, gamma=0.90)
+    scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=1, gamma=0.9)
 
     criterion = nn.CrossEntropyLoss()
 
@@ -83,26 +81,18 @@ def ed_train(train_iter, val_iter, TEXT, LABEL):
             start_time = time.time()
             true_batch_num = (len(train_iter) * epoch-1) + b_num
 
-            # The actual target (that we're using to calculate loss) is expecting words from index
-            # through n. Think of it this way: if we're trying to generate the sequence of words:
-            # ["<sod>", "He", "ran", "to", "the", "park", "<eod>"]
-            # Then we want to compare the output against ["He", "ran", "to", "the", "park", "<eod>"],
-            # with the input taking the form of          ["<sod>", "He", "ran", "to", "the", "park"],
-            # where
-            # ["<sod>"] generates "He",
-            # ["<sod>", "He"], generates "ran"
-            # etc.
-            #
-            # Therefore, the inputs need to be "shifted" to the left, and the outputs need to be
-            # "shifted" to the right. This prevents the Transformer from copying the tgt_input to
-            # the outputs
             src_input, tgt_input, row_src, row_tgt = parse_batch(batch)
+            if epoch == 1 and b_num == 0:
+                print('src_input shape:', src_input.shape)
+                print('tgt_input shape:', tgt_input.shape)
+                print('row_src:', row_src.shape)
+                print('row_tgt:', row_tgt.shape)
 
             SRC_SEQ_LEN = row_src.size(-1)
             TGT_SEQ_LEN = row_tgt.size(-1)
 
             src_mask, src_key_padding_mask, memory_key_padding_mask = create_src_masks(
-                row_src, SRC_SEQ_LEN, TEXT)
+                row_src, SRC_SEQ_LEN, TEXT, use_srcmask=args.srcmask)
             tgt_mask, tgt_key_padding_mask = create_tgt_masks(row_tgt, TGT_SEQ_LEN, LABEL)
 
             output = model(src_input, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask,
@@ -113,6 +103,7 @@ def ed_train(train_iter, val_iter, TEXT, LABEL):
             loss = criterion(output.view(-1, TGT_V_SIZE), row_tgt.contiguous().view(-1))
             optim.zero_grad()
             loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 0.5)  # prevent exploding gradient
             optim.step()
 
             loss_values_sum += loss.item()
@@ -156,12 +147,14 @@ def ed_train(train_iter, val_iter, TEXT, LABEL):
         if epoch != N_EPOCHS:
             save_path = f'{args.savepath}train{epoch}.pth'
             torch.save(model.state_dict(), save_path)
-            try:
-                files.download(save_path)
-            except:
-                print(f'Unable to download {save_path}')
+            if epoch > 1:  # save the previous model
+                save_path = f'{args.savepath}train{epoch-1}.pth'
+                try:
+                    files.download(save_path)
+                except:
+                    print(f'Unable to download {save_path}')
 
-    print(f'Expected output shape {tgt_input.shape}\nTargets:{tgt_input}')
+    print(f'Expected output shape {row_tgt.shape}\nTargets:{row_tgt}')
     print(f'output raw shape: {output.shape}\nargmax:\n{format_preds(output, TGT_SEQ_LEN)}')
 
     save_path = f'{args.savepath}goldtrain.pth'
@@ -186,7 +179,7 @@ def ed_evaluate(model, val_iter, TEXT, LABEL):
             TGT_SEQ_LEN = row_tgt.size(-1)
 
             src_mask, src_key_padding_mask, memory_key_padding_mask = create_src_masks(
-                row_src, SRC_SEQ_LEN, TEXT)
+                row_src, SRC_SEQ_LEN, TEXT, use_srcmask=args.srcmask)
             tgt_mask, tgt_key_padding_mask = create_tgt_masks(row_tgt, TGT_SEQ_LEN, LABEL)
 
             output = model(src_input, tgt_input, src_mask=src_mask, tgt_mask=tgt_mask,
@@ -211,10 +204,11 @@ def ed_evaluate(model, val_iter, TEXT, LABEL):
 
 
 def parse_batch(batch):
-    src_input = batch.passage.to(device)
+    src_input = batch.passage[1:, :].to(device)
     tgt_input = batch.references[:-1, :].to(device)
-    row_src = batch.passage.transpose(0, 1)
+    row_src = src_input.transpose(0, 1).to(device)
     row_tgt = batch.references[1:, :].transpose(0, 1).to(device)
+
     return src_input, tgt_input, row_src, row_tgt
 
 
@@ -268,13 +262,14 @@ if __name__ == '__main__':
             def __init__(self):
                 self.datapath = './'
                 self.savepath = './models/'
-                self.modeldim = 512
-                self.nlayers = 6
-                self.nheads = 8
+                self.modeldim = 768
+                self.nlayers = 4  # must clip gradients to use > 4
+                self.nheads = 12
                 self.dropout = 0.2
-                self.lr = 1e-3
+                self.lr = 1e-2
                 self.epochs = 15
-                self.batchsize = 8
+                self.batchsize = 1
+                self.srcmask = False
                 self.predict = False
                 self.linear = False
                 self.verbose = False
@@ -289,14 +284,14 @@ if __name__ == '__main__':
         parser.add_argument('--nlayers', type=int, default=N_LAYERS, help='n_layers param')
         parser.add_argument('--nheads', type=int, default=N_HEADS, help='n_heads param')
         parser.add_argument('--dropout', type=float, default=DROPOUT, help='dropout param')
-        parser.add_argument('--lr', type=float, default=LR,
-                            help='Learning Rate')
+        parser.add_argument('--lr', type=float, default=LR, help='Learning Rate')
         parser.add_argument('--epochs', type=int, default=N_EPOCHS, help='Number of epochs')
         parser.add_argument('--batchsize', type=int, default=B_SIZE, help='Batch size')
+        parser.add_argument('--srcmask', action='store_true', default=False)
         parser.add_argument('--predict', type=str, default=False)
         parser.add_argument('--predmodel', type=str)
-        parser.add_argument('--linear', action='store_true')
-        parser.add_argument('-v', '--verbose', action='store_true')
+        parser.add_argument('--linear', action='store_true', default=False)
+        parser.add_argument('-v', '--verbose', action='store_true', default=False)
         args = parser.parse_args()
 
     main()
